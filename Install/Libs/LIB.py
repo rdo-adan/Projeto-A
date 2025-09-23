@@ -1,0 +1,4 @@
+LIBRARIES = [
+    "json",
+    "os",
+]
