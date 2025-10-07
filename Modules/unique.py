@@ -1,118 +1,75 @@
-# unique_sequence_aggregator.py
-# unique.py --- This module aggregates unique sequences from JSON files into a consolidated JSON file
-import sys
-import importlib
+# Modules/unique.py
 
-# --- Importação da lista de bibliotecas do arquivo de configuração ---
-try:
-    # Certifique-se de que o caminho 'Install.Libs.LIB' reflete a estrutura de pastas correta
-    from Install.Libs.LIB import LIBRARIES
-except ImportError:
-    print("Erro: Não foi possível importar LIBRARIES do arquivo 'Install/Libs/LIB.py'.")
-    print("Verifique se o arquivo existe e se a estrutura de pastas está correta.")
-    print("Certifique-se também de que o diretório 'Install' está no Python Path ou")
-    print("que você está executando o script de um local que permite a importação.")
-    sys.exit(1)
+from Install.Libs.LIB import MODULES
+os = MODULES["os"]
+json = MODULES["json"]
 
-
-def import_configured_libraries(library_list):
+def aggregate_unique_sequences(input_directory="assets/Collections/Sequences_cleaned", output_directory="assets/Collections/Unique", imported_modules=None):
     """
-    Importa bibliotecas dinamicamente a partir de uma lista Python.
+    Lê todos os arquivos JSON de sequências limpas (recursivo em subdiretórios),
+    agrega apenas sequências únicas e salva CADA SEQUÊNCIA ÚNICA em arquivo JSON separado
+    em 'output_directory'.
 
     Args:
-        library_list (list): Uma lista de strings com os nomes das bibliotecas.
-
-    Returns:
-        dict: Um dicionário onde as chaves são os nomes das bibliotecas e os valores
-              são os módulos importados. Retorna None para módulos que falharam na importação.
+        input_directory (str): Diretório raiz com arquivos JSON das sequências limpas (por amostra).
+        output_directory (str): Diretório onde cada sequência única será salva como arquivo JSON individual.
+        imported_modules (dict): Dicionário de módulos, se diferente do padrão.
     """
-    imported_modules = {}
-    for lib_name in library_list:
-        try:
-            modulo = importlib.import_module(lib_name)
-            imported_modules[lib_name] = modulo
-            # print(f"Biblioteca '{lib_name}' importada com sucesso.") # Comentado para evitar poluir o output principal
-        except ImportError:
-            print(f"Erro: Biblioteca '{lib_name}' não encontrada. Certifique-se de que está instalada.")
-            imported_modules[lib_name] = None
-        except Exception as e:
-            print(f"Erro inesperado ao importar '{lib_name}': {e}")
-            imported_modules[lib_name] = None
-    return imported_modules
+    if imported_modules is not None:
+        os_mod = imported_modules.get("os")
+        json_mod = imported_modules.get("json")
+    else:
+        os_mod = os
+        json_mod = json
 
-# --- Lógica para agregar sequências únicas ---
-def aggregate_unique_sequences(input_directory="Collections/Sequences", output_file="unique_sequences.json", imported_modules=None):
-    """
-    Lê todos os arquivos JSON de um diretório, extrai sequências únicas
-    e as salva em um único arquivo JSON consolidado.
-
-    Args:
-        input_directory (str): O diretório onde os arquivos JSON de sequências estão localizados.
-        output_file (str): O caminho e nome do arquivo JSON de saída consolidado.
-        imported_modules (dict): Dicionário de módulos importados dinamicamente ('json', 'os').
-    """
-    if imported_modules is None:
-        print("Erro: Nenhum dicionário 'imported_modules' fornecido para 'aggregate_unique_sequences'.")
-        print("Os módulos 'json' e 'os' são necessários para esta função.")
-        return
-
-    json_mod = imported_modules.get('json')
-    os_mod = imported_modules.get('os')
-
-    if not json_mod or not os_mod:
-        print("Erro: Os módulos 'json' ou 'os' não estão disponíveis via 'imported_modules'. Não é possível prosseguir.")
-        return
-
-    unique_sequences = {}  # Usamos um dicionário para garantir unicidade pela sequência
+    unique_sequences = {}
     processed_files_count = 0
+    
+    # Cria diretório de saída se não existir
+    if not os_mod.path.exists(output_directory):
+        os_mod.makedirs(output_directory)
 
-    print(f"Agregando sequências únicas do diretório: {input_directory}")
+    print(f"Agregando sequências únicas (polidas) do diretório: {input_directory}")
 
-    if not os_mod.path.exists(input_directory):
-        print(f"Erro: Diretório de entrada '{input_directory}' não encontrado.")
-        return
-
-    for filename in os_mod.listdir(input_directory):
-        if filename.endswith(".json"):
-            file_path = os_mod.path.join(input_directory, filename)
-            try:
-                with open(file_path, 'r') as f:
-                    data = json_mod.load(f)
-                    sequence = data.get("sequencia")
-                    seq_id = data.get("id")
-                    seq_len = data.get("tamanho") # Pega o tamanho se existir
-
-                    if sequence:
-                        # Usamos a sequência como chave para garantir unicidade
-                        # E armazenamos os dados completos, ou apenas ID e tamanho para duplicatas
-                        if sequence not in unique_sequences:
+    # Busca recursiva em todos subdiretórios
+    for root, dirs, files in os_mod.walk(input_directory):
+        for filename in files:
+            if filename.endswith(".json"):
+                file_path = os_mod.path.join(root, filename)
+                try:
+                    with open(file_path, 'r') as f:
+                        data = json_mod.load(f)
+                        sequence = data.get("sequence")
+                        seq_id = data.get("ID")
+                        seq_len = data.get("size")
+                        sample_name = data.get("sample_name")
+                        # Garante unicidade pela sequência
+                        if sequence and sequence not in unique_sequences:
                             unique_sequences[sequence] = {
-                                "id": seq_id,
-                                "sequencia": sequence,
-                                "tamanho": seq_len
+                                "ID": seq_id,
+                                "sequence": sequence,
+                                "size": seq_len,
+                                "sample_name": sample_name
                             }
-                        # else:
-                            # Opcional: registrar que uma duplicata foi encontrada
-                            # print(f"Sequência duplicada encontrada (ID: {seq_id}), ignorando.")
+                    processed_files_count += 1
+                except json_mod.JSONDecodeError:
+                    print(f"Aviso: Arquivo '{filename}' não é um JSON válido. Ignorando.")
+                except Exception as e:
+                    print(f"Erro ao processar '{filename}': {e}")
 
-                processed_files_count += 1
-            except json_mod.JSONDecodeError:
-                print(f"Aviso: Arquivo '{filename}' não é um JSON válido. Ignorando.")
-            except Exception as e:
-                print(f"Erro ao processar o arquivo '{filename}': {e}")
-
-    # Convertendo o dicionário de sequências únicas de volta para uma lista de objetos
-    # para salvá-lo no JSON final.
-    final_unique_list = list(unique_sequences.values())
+    # Salva cada sequência única em arquivo JSON separado
+    unique_count = 0
+    for idx, (sequence, data) in enumerate(unique_sequences.items()):
+        safe_id = "".join([c if c.isalnum() else "_" for c in data["ID"]])
+        json_filename = f"unique_{safe_id}_{idx}.json"
+        json_path = os_mod.path.join(output_directory, json_filename)
+        try:
+            with open(json_path, 'w') as out_f:
+                json_mod.dump(data, out_f, indent=4)
+            unique_count += 1
+        except Exception as e:
+            print(f"Erro ao salvar sequência única '{data['ID']}': {e}")
 
     print(f"Processados {processed_files_count} arquivos JSON.")
-    print(f"Total de sequências únicas encontradas: {len(final_unique_list)}")
-
-    try:
-        with open(output_file, 'w') as out_f:
-            json_mod.dump(final_unique_list, out_f, indent=4)
-        print(f"Sequências únicas salvas com sucesso em '{output_file}'.")
-    except Exception as e:
-        print(f"Erro ao salvar o arquivo consolidado '{output_file}': {e}")
-
-# As funções e a lista LIBRARIES são expostas para serem usadas pelo main.py
+    print(f"Total de sequências únicas encontradas: {len(unique_sequences)}")
+    print(f"Sequências únicas salvas individualmente em '{output_directory}': {unique_count} arquivos.")

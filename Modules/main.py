@@ -1,75 +1,81 @@
-# Modules/main.py
-# main.py
-
+from Install.Libs.LIB import MODULES
+os = MODULES["os"]
+json = MODULES["json"]
 import sys
-import os
 
-# Adiciona o diretório pai (a raiz do projeto) ao Python Path
-# Isso permite importar módulos como 'Install.Libs.LIB'
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-sys.path.insert(0, project_root)
-
-# Restante dos imports do seu main.py
-from sep import LIBRARIES, import_configured_libraries, separate_fasta_to_json
-from unique import aggregate_unique_sequences
-from check import is_valid_sequence_file, convert_to_fasta
+from Modules.check import find_valid_fastq_files
+from Modules.quality import (
+    extract_fastq_sequences_and_qualities_with_ids,
+    extract_fasta_sequences_with_ids,
+    QualityCutter,
+    export_cut_sequences_to_json,
+    export_fasta_sequences_to_json,
+)
+from Modules.unique import aggregate_unique_sequences
+from Modules.search import (
+    add_taxonomy_to_unique_jsons,
+    count_unique_sequences_in_raw_fast,
+    blast_taxonomy_search_local,
+    parse_taxonomy_from_description,
+)
 
 def main():
-    """
-    Função principal para orquestrar a importação de bibliotecas,
-    a validação/conversão de arquivos, o processamento FASTA
-    e a agregação de sequências únicas.
-    """
-    print("Iniciando a aplicação principal...")
+    # --- INPUT/VALIDAÇÃO ---
+    input_path = sys.argv[1] if len(sys.argv) > 1 else input(
+        "\nInforme o caminho do arquivo, pasta ou pasta com subpastas de arquivos FASTQ/FASTA: ").strip()
+    _ = find_valid_fastq_files(input_path)  # Copia arquivos válidos para Raw_sequences
 
-    # 1. Importa as bibliotecas configuradas no LIB.py
-    modules = import_configured_libraries(LIBRARIES)
+    # --- LIMPEZA/EXPORTAÇÃO ---
+    raw_sequences_root = os.path.join("assets", "Collections", "Raw_sequences")
+    for amostra in os.listdir(raw_sequences_root):
+        amostra_dir = os.path.join(raw_sequences_root, amostra)
+        if not os.path.isdir(amostra_dir):
+            continue
+        for arquivo in os.listdir(amostra_dir):
+            input_file = os.path.join(amostra_dir, arquivo)
+            if arquivo.lower().endswith(('.fasta', '.fa')):
+                # Apenas extração e exportação, sem corte de qualidade!
+                ids, seqs = extract_fasta_sequences_with_ids(input_file)
+                export_fasta_sequences_to_json(ids, seqs, input_file, sample_name=amostra)
+            elif arquivo.lower().endswith(('.fastq', '.fq', '.fastq.gz')):
+                ids, seqs, qs = extract_fastq_sequences_and_qualities_with_ids(input_file)
+                # Se não houver scores (para garantir robustez)
+                if not qs or not isinstance(qs[0], list) or qs[0] is None:
+                    print(f"[INFO] Pulando corte de qualidade: {arquivo} não contém scores válidos.")
+                    continue
+                cutter = QualityCutter()
+                try:
+                    cutter.analyze_and_set_cutoff(qs)
+                except Exception as e:
+                    print(f"[ERRO] Corte de qualidade falhou para {arquivo}: {str(e)} – Pulando este arquivo.")
+                    continue
+                seqs_filt, qs_filt = cutter.cut_low_quality_bases(seqs, qs)
+                ids_filt = [
+                    i for i, s, q in zip(ids, seqs, qs)
+                    if len(''.join([base for base, score in zip(s, q) if score >= cutter.cutoff])) > 0
+                ]
+                export_cut_sequences_to_json(ids_filt, seqs_filt, qs_filt, input_file, output_dir=None, sample_name=amostra)
 
-    # 2. Verifica se os módulos essenciais (json, os) foram importados
-    if modules.get('json') is None or modules.get('os') is None:
-        print("Erro: As bibliotecas essenciais ('json' ou 'os') não puderam ser carregadas. Saindo.")
-        sys.exit(1)
+    # --- AGREGAÇÃO DE SEQUÊNCIAS ÚNICAS ---
+    aggregate_unique_sequences(
+        input_directory="assets/Collections/Sequences_cleaned",
+        output_directory="assets/Collections/Unique"
+    )
 
-    # --- Seção de Validação e Conversão de Arquivo de Entrada ---
-    # Definir o arquivo de entrada do usuário (pode ser FASTQ ou FASTA)
-    print("Por favor, insira o caminho do arquivo de entrada (FASTA ou FASTQ):")
-    user_input_file = input('') 
+    # --- BUSCA TAXONÔMICA ---
+    blast_db_path = "/caminho/para/seu/banco"  # Ajuste conforme seu sistema!
+    add_taxonomy_to_unique_jsons(
+        unique_dir="assets/Collections/Unique",
+        taxonomy_func=lambda seq: blast_taxonomy_search_local(seq, blast_db_path, parse_func=parse_taxonomy_from_description)
+    )
 
-    # Diretório para salvar o arquivo FASTA processado/convertido
-    processed_fasta_dir = "Processed_FASTA_Files"
+    # --- MATRIZ/CONTAGEM DE ABUNDÂNCIA ---
+    df_abundancia = count_unique_sequences_in_raw_fast(
+        unique_dir="assets/Collections/Unique",
+        raw_dir="assets/Collections/Raw_sequences"
+    )
 
-    print(f"\n--- Verificando e convertendo arquivo de entrada: {user_input_file} ---")
-    fasta_file_for_processing = convert_to_fasta(user_input_file, processed_fasta_dir, imported_modules=modules)
-
-    if fasta_file_for_processing is None:
-        print("Erro: Não foi possível obter um arquivo FASTA válido para processamento. Saindo.")
-        sys.exit(1)
-
-    # --- Seção de Processamento FASTA para JSONs Individuais ---
-    output_sequences_dir = "Collections/Sequences" # Diretório de saída para JSONs individuais
-
-    print(f"\n--- Separando o arquivo FASTA '{os.path.basename(fasta_file_for_processing)}' em JSONs individuais ---")
-    # Agora chamamos a função que sabe lidar com FASTA!
-    separate_fasta_to_json(fasta_file_for_processing, output_sequences_dir, imported_modules=modules)
-
-    # --- Seção de Agregação de Sequências Únicas ---
-    # O diretório de entrada para a agregação será o diretório onde os JSONs individuais
-    # foram salvos, que é "Collections/Sequences".
-    output_unique_dir = "Collections/Unique_S"
-    # Certifica-se de que o diretório de saída para sequências únicas existe (já feito no `main.py` anterior)
-    # mas para ser idempotente, mantemos a verificação aqui.
-    if not os.path.exists(output_unique_dir):
-        os.makedirs(output_unique_dir)
-        print(f"Diretório '{output_unique_dir}' criado com sucesso para sequências únicas.")
-
-    # Define o caminho completo do arquivo JSON consolidado
-    output_unique_file = os.path.join(output_unique_dir, "unique_sequences.json")
-
-    print(f"\n--- Agregando sequências únicas da pasta: {output_sequences_dir} ---")
-    aggregate_unique_sequences(output_sequences_dir, output_unique_file, imported_modules=modules)
-
-    print("\nAplicação concluída.")
+    print(f"\n[SUCCESS] Pipeline completo: dados organizados, limpos, únicas salvas, taxonomia atribuída, matriz de abundância pronta!")
 
 if __name__ == "__main__":
     main()

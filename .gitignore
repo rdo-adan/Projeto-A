@@ -1,0 +1,58 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.swp
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+# pipenv
+Pipfile.lock
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# VSCode settings
+.vscode/
+
+# MacOS/Linux/Windows
+.DS_Store
+Thumbs.db
+*.bak
+
+# Test, coverage, build files
+.cache/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+
+# Data outputs (opcional)
+results/
+output/
+*.csv
+*.tsv
+*.xlsx
+
+# Interface and desktop extras
+*.db
+*.sqlite3
+
+# Others
+.idea/
+*.~*
+*.tmp
+
+# Exemplo: ignorar dados confidenciais
+data/
+secrets.json
